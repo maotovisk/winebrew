@@ -35,7 +35,7 @@ install_package() {
 
 # === Ensure required tools ===
 require_dependencies() {
-    for dep in jq icotool unzip; do
+    for dep in jq unzip; do
         if ! command -v "$dep" &> /dev/null; then
             warn "'$dep' is not installed. Attempting to install..."
             install_package "$dep" || {

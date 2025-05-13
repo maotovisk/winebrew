@@ -211,6 +211,12 @@ check_for_updates() {
         echo '{"version": "0.0.0"}' > "$local_version_file"
     fi
 
+    # check if version has any content aswelll
+    if [[ ! -s "$local_version_file" ]]; then
+        warn "Local version file is empty... Creating it."
+        echo '{"version": "0.0.0"}' > "$local_version_file"
+    fi
+
     local local_version=$(jq -r .version "$local_version_file")
     local remote_version=$(curl -s "$remote_version_url" | jq -r .version)
 
@@ -241,7 +247,7 @@ check_for_updates() {
             rm -rf "$tmp_dir"
 
             info "Updated winebrew to version $remote_version"
-            echo "$remote_version" > "$local_version_file"
+            echo "{\"version\": \"$remote_version\"}" > "$local_version_file"
         else
             info "Update cancelled."
         fi

@@ -2,7 +2,7 @@
 
 # === Configuration ===
 export WINEPREFIX="$HOME/.sbrewprefix"
-export WINEARCH=win32
+export WINEARCH=wow64
 export WINEDEBUG="-all"
 export SBREW_PATH="$HOME/.local/share/sbrew"
 export STORYBREW_EXE="$SBREW_PATH/StorybrewEditor.exe"
@@ -10,10 +10,37 @@ export STORYBREW_DRIVE_PATH="D:\\StorybrewEditor.exe"
 export WINEBREW_SCRIPT_PATH="$HOME/.local/bin/winebrew"
 export VERSION_DIR="$HOME/.local/share/winebrew"
 
+# === Wine-osu configuration ===
+export WINE_OSU_DIR="$HOME/.local/share/winebrew/wine-osu"
+export WINE_OSU_VERSION="10.6-1"
+export WINE_OSU_VERSION_FILE="$VERSION_DIR/wine-osu-version"
+export WINE_OSU_BIN="$WINE_OSU_DIR/bin/wine"
+
+# === PATH configuration ===
+export PATH="$WINE_OSU_DIR/bin:$PATH"
+
 # === Colored logging helpers ===
 info()  { echo -e "\e[32m[winebrew] INFO:\e[0m $*"; }
 warn()  { echo -e "\e[33m[winebrew] WARNING:\e[0m $*"; }
 error() { echo -e "\e[31m[winebrew] ERROR:\e[0m $*"; }
+
+# === Download helper ===
+download_file() {
+    local url="$1"
+    local output_path="$2"
+
+    info "Downloading: $url"
+    if command -v wget &>/dev/null; then
+        wget -q --show-progress -O "$output_path" "$url"
+        return $?
+    elif command -v curl &>/dev/null; then
+        curl -L --progress-bar -o "$output_path" "$url"
+        return $?
+    else
+        error "Neither wget nor curl is installed. Cannot download file."
+        return 1
+    fi
+}
 
 # === Distro package installer ===
 install_package() {
@@ -87,15 +114,18 @@ install_storybrew() {
         exit 1
     fi
 
-    info "Downloading Storybrew from: $zip_url"
     TMP=$(mktemp -d)
-    pushd "$TMP" > /dev/null
-    curl -LO "$zip_url"
+    local zip_file="$TMP/storybrew.zip"
+
+    download_file "$zip_url" "$zip_file" || {
+        error "Failed to download Storybrew. Please check your internet connection."
+        rm -rf "$TMP"
+        exit 1
+    }
 
     info "Extracting..."
     mkdir -p "$SBREW_PATH"
-    unzip -q *.zip -d "$SBREW_PATH"
-    popd > /dev/null
+    unzip -q "$zip_file" -d "$SBREW_PATH"
     rm -rf "$TMP"
 
     [[ -f "$STORYBREW_EXE" ]] && info "Storybrew installed successfully." || {
@@ -106,26 +136,36 @@ install_storybrew() {
 
 # === .NET + SDK setup ===
 fixprefix() {
-    info "Resetting Wine 32-bit prefix..."
+    info "Resetting Wine prefix..."
     rm -rf "$WINEPREFIX"
     mkdir -p "$WINEPREFIX"
 
     info "Creating new prefix..."
-    WINEPREFIX="$WINEPREFIX" WINEARCH=win32 wineboot
+    WINEPREFIX="$WINEPREFIX" wineboot
 
     info "Setting Windows version to 10..."
     wine reg add "HKCU\\Software\\Wine\\Wine\\Config" /v Version /t REG_SZ /d win10 /f
 
-    info "Installing .NET Desktop Runtime 8.0.8 (x86)..."
     TMP=$(mktemp -d)
-    pushd "$TMP"
-    wget -q https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.8/windowsdesktop-runtime-8.0.8-win-x86.exe
-    WINEPREFIX="$WINEPREFIX" wine windowsdesktop-runtime-8.0.8-win-x86.exe /quiet /norestart
+
+    info "Installing .NET Desktop Runtime 8.0.8 (x86)..."
+    local runtime_url="https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.8/windowsdesktop-runtime-8.0.8-win-x86.exe"
+    local runtime_file="$TMP/dotnet-runtime.exe"
+    download_file "$runtime_url" "$runtime_file" || {
+        error "Failed to download .NET Runtime. Please check your internet connection."
+        exit 1
+    }
+    WINEPREFIX="$WINEPREFIX" wine "$runtime_file" /quiet /norestart
 
     info "Installing .NET SDK 8.0.408 (x86)..."
-    wget -q https://builds.dotnet.microsoft.com/dotnet/Sdk/8.0.408/dotnet-sdk-8.0.408-win-x86.exe
-    WINEPREFIX="$WINEPREFIX" wine dotnet-sdk-8.0.408-win-x86.exe /quiet /norestart
-    popd
+    local sdk_url="https://builds.dotnet.microsoft.com/dotnet/Sdk/8.0.408/dotnet-sdk-8.0.408-win-x86.exe"
+    local sdk_file="$TMP/dotnet-sdk.exe"
+    download_file "$sdk_url" "$sdk_file" || {
+        error "Failed to download .NET SDK. Please check your internet connection."
+        exit 1
+    }
+    WINEPREFIX="$WINEPREFIX" wine "$sdk_file" /quiet /norestart
+
     rm -rf "$TMP"
 
     ensure_drive_mapping
@@ -170,20 +210,26 @@ install_desktop_entry() {
 
     info "Installing Storybrew icon..."
     mkdir -p "$icon_dir"
-    wget -q -O "$ico_file" "$ico_url"
+    download_file "$ico_url" "$ico_file"
 
-    local icon_path="$ico_file"
+    if [[ ! -f "$ico_file" ]]; then
+        error "Failed to download icon file... Using default icon."
 
-    if ! command -v icotool &> /dev/null; then
-        warn "'icotool' not found. Trying to install 'icoutils'..."
-        install_package icoutils || return
-    fi
+    else
+        info "Icon downloaded successfully."
+        local icon_path="$ico_file"
 
-    if command -v icotool &> /dev/null; then
-        icotool -x -o "$icon_dir" "$ico_file"
-        icon_path=$(find "$icon_dir" -type f -name '*256x256x32.png' | head -n1)
-        [[ -z "$icon_path" ]] && icon_path=$(find "$icon_dir" -type f -name '*.png' | head -n1)
-        [[ -z "$icon_path" ]] && icon_path="$ico_file"
+        if ! command -v icotool &> /dev/null; then
+            warn "'icotool' not found. Trying to install 'icoutils'..."
+            install_package icoutils || return
+        fi
+
+        if command -v icotool &> /dev/null; then
+            icotool -x -o "$icon_dir" "$ico_file"
+            icon_path=$(find "$icon_dir" -type f -name '*256x256x32.png' | head -n1)
+            [[ -z "$icon_path" ]] && icon_path=$(find "$icon_dir" -type f -name '*.png' | head -n1)
+            [[ -z "$icon_path" ]] && icon_path="$ico_file"
+        fi
     fi
 
     info "Writing .desktop file..."
@@ -217,9 +263,13 @@ check_for_updates() {
         echo '{"version": "0.0.0"}' > "$local_version_file"
     fi
 
-    # check if version has any content aswelll
     if [[ ! -s "$local_version_file" ]]; then
         warn "Local version file is empty... Creating it."
+        echo '{"version": "0.0.0"}' > "$local_version_file"
+    fi
+
+    if ! jq empty "$local_version_file" 2>/dev/null; then
+        warn "Local version file has invalid JSON format. Creating a new one."
         echo '{"version": "0.0.0"}' > "$local_version_file"
     fi
 
@@ -237,11 +287,18 @@ check_for_updates() {
         read -r answer
         if [[ "$answer" =~ ^[Yy]$ ]]; then
             local tmp_dir=$(mktemp -d)
-            curl -s -o "$tmp_dir/winebrew" "$remote_script_url"
+            local tmp_script="$tmp_dir/winebrew"
+            download_file "$remote_script_url" "$tmp_script"
+            if [[ $? -ne 0 ]]; then
+                error "Failed to download the new version."
+                rm -rf "$tmp_dir"
+                exit 1
+            fi
+
             info "Removing old version..."
             rm -f "$WINEBREW_SCRIPT_PATH"
             info "Installing new version..."
-            mv "$tmp_dir/winebrew" "$WINEBREW_SCRIPT_PATH"
+            mv "$tmp_script" "$WINEBREW_SCRIPT_PATH"
             chmod +x "$WINEBREW_SCRIPT_PATH"
 
             if [[ -f "$WINEBREW_SCRIPT_PATH" ]]; then
@@ -260,6 +317,75 @@ check_for_updates() {
     else
         info "You are running the latest version: $local_version"
     fi
+    update_wine_osu
+}
+
+# === Wine-osu installation and update ===
+update_wine_osu() {
+    info "Checking for wine-osu updates..."
+    local installed_version="0"
+
+    # Create wine-osu directory if it doesn't exist
+    mkdir -p "$WINE_OSU_DIR"
+    mkdir -p "$VERSION_DIR"
+
+    # Get installed version if exists
+    if [ -f "$WINE_OSU_VERSION_FILE" ]; then
+        installed_version=$(<"$WINE_OSU_VERSION_FILE")
+        # Validate version format
+        if [[ ! "$installed_version" =~ ^[0-9]+\.[0-9]+-[0-9]+$ && "$installed_version" != "0" ]]; then
+            warn "Invalid version format in wine-osu version file. Resetting to 0."
+            installed_version="0"
+            echo "0" > "$WINE_OSU_VERSION_FILE"
+        fi
+    else
+        # Create initial version file if it doesn't exist
+        echo "0" > "$WINE_OSU_VERSION_FILE"
+    fi
+
+    info "wine-osu: installed version: $installed_version, latest version: $WINE_OSU_VERSION"
+
+    if [ "$installed_version" != "$WINE_OSU_VERSION" ]; then
+        info "Wine-osu update available!"
+
+        # Wine-osu download URL
+        local wine_url="https://github.com/NelloKudo/WineBuilder/releases/download/wine-osu-staging-${WINE_OSU_VERSION}/wine-osu-winello-fonts-wow64-${WINE_OSU_VERSION}-x86_64.tar.xz"
+        local tmp_file="/tmp/wine-osu-${WINE_OSU_VERSION}-$(date +%s).tar.xz"
+
+        # Download Wine-osu
+        info "Downloading Wine-osu version $WINE_OSU_VERSION..."
+        if ! download_file "$wine_url" "$tmp_file"; then
+            error "Failed to download Wine-osu. Please check your internet connection."
+            return 1
+        fi
+
+        # Remove old Wine-osu installation
+        info "Removing old Wine-osu installation..."
+        rm -rf "$WINE_OSU_DIR"
+        mkdir -p "$WINE_OSU_DIR"
+
+        # Extract Wine-osu
+        info "Installing Wine-osu version $WINE_OSU_VERSION..."
+        tar -xf "$tmp_file" -C "$WINE_OSU_DIR" --strip-components=1
+        rm -f "$tmp_file"
+
+        # Check if installation was successful
+        if [ -x "$WINE_OSU_BIN" ]; then
+            # Update version file only after successful installation
+            echo "$WINE_OSU_VERSION" > "$WINE_OSU_VERSION_FILE"
+            chmod +x "$WINE_OSU_BIN"
+            info "Wine-osu version $WINE_OSU_VERSION installed successfully!"
+        else
+            error "Wine-osu installation failed. The binary was not found at $WINE_OSU_BIN"
+            # Restore old version in version file
+            echo "$installed_version" > "$WINE_OSU_VERSION_FILE"
+            return 1
+        fi
+    else
+        info "Wine-osu is already up-to-date (version $WINE_OSU_VERSION)"
+    fi
+
+    return 0
 }
 
 # === Setup run_as_linux ===
@@ -327,19 +453,43 @@ EOF
     info "Wine will now use xdg-open for folders."
 }
 
+# === Display help ===
+show_help() {
+    cat << EOF
+winebrew - Storybrew and wine-osu management tool
+
+Usage: winebrew [OPTION]
+
+Options:
+  --help                  Display this help message
+  --fix-prefix            Recreate Wine prefix and reinstall .NET
+  --install-storybrew     (Re)download Storybrew to the correct folder
+  --setup-vscode          Recreate the VSCode passthrough script
+  --install-desktop       Create a desktop entry for launching
+  --update                Check for updates to the script and wine-osu
+  --update-wine-osu       Check for and install updates to wine-osu only
+  --debug                 Print installed .NET runtimes in the prefix
+  --setup-folders         Configure folder opening in Wine
+
+When run without options, winebrew will launch Storybrew.
+EOF
+}
+
 # === Main ===
 case "$1" in
+    --help) show_help ;;
     --fix-prefix) fixprefix ;;
     --install-storybrew) install_storybrew ;;
     --setup-vscode) setup_vscode_passthrough ;;
     --install-desktop) install_desktop_entry ;;
     --update) check_for_updates ;;
+    --update-wine-osu) update_wine_osu ;;
     --debug) debuginfo ;;
     --setup-folders) setup_folder_hijack ;;
     "") launch_storybrew ;;
     *)
         error "Unknown argument: $1"
-        echo "Usage: $0 [--fix-prefix | --install-storybrew | --setup-vscode | --install-desktop | --debug | --setup-folders]"
+        echo "Use 'winebrew --help' for a list of available options"
         exit 1
         ;;
 esac

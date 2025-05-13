@@ -43,7 +43,7 @@ install_package() {
 
 # === Ensure required tools ===
 require_dependencies() {
-    for dep in jq unzip; do
+    for dep in jq unzip wget; do
         if ! command -v "$dep" &> /dev/null; then
             warn "'$dep' is not installed. Attempting to install..."
             install_package "$dep" || {
@@ -71,6 +71,7 @@ require_dependencies
 # === Run initial setup steps ===
 "$TARGET_DIR/winebrew" --fix-prefix
 "$TARGET_DIR/winebrew" --install-storybrew
+"$TARGET_DIR/winebrew" --update-wine-osu
 "$TARGET_DIR/winebrew" --install-desktop
 
 info "winebrew installation complete."

@@ -201,6 +201,7 @@ EOF
 check_for_updates() {
     local local_version_file="$VERSION_DIR/version.json"
     local remote_version_url="https://raw.githubusercontent.com/maotovisk/winebrew/main/version.json"
+    local remote_script_url="https://raw.githubusercontent.com/maotovisk/winebrew/main/winebrew"
 
     if [[ ! -f "$local_version_file" ]]; then
         warn "Local version file not found... Creating it."
@@ -219,7 +220,7 @@ check_for_updates() {
         read -r answer
         if [[ "$answer" =~ ^[Yy]$ ]]; then
             local tmp_dir=$(mktemp -d)
-            curl -s -O https://raw.githubusercontent.com/maotovisk/winebrew/main/winebrew "$tmp_dir/winebrew"
+            curl -s -o "$tmp_dir/winebrew" "$remote_script_url"
             info "Removing old version..."
             rm -f "$WINEBREW_SCRIPT_PATH"
             info "Installing new version..."

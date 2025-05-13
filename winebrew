@@ -1,0 +1,240 @@
+#!/bin/bash
+
+# === Configuration ===
+export WINEPREFIX="$HOME/.sbrewprefix"
+export WINEARCH=win32
+export WINEDEBUG="-all"
+export SBREW_PATH="$HOME/.local/share/sbrew"
+export STORYBREW_EXE="$SBREW_PATH/StorybrewEditor.exe"
+export STORYBREW_DRIVE_PATH="D:\\StorybrewEditor.exe"
+
+# === Colored logging helpers ===
+info()  { echo -e "\e[32m[winebrew] INFO:\e[0m $*"; }
+warn()  { echo -e "\e[33m[winebrew] WARNING:\e[0m $*"; }
+error() { echo -e "\e[31m[winebrew] ERROR:\e[0m $*"; }
+
+# === Distro package installer ===
+install_package() {
+    local pkg="$1"
+    if command -v pacman &>/dev/null; then
+        info "Detected Arch Linux. Installing $pkg via pacman..."
+        sudo pacman -Sy --noconfirm "$pkg"
+    elif command -v apt &>/dev/null; then
+        info "Detected Debian/Ubuntu. Installing $pkg via apt..."
+        sudo apt update && sudo apt install -y "$pkg"
+    elif command -v dnf &>/dev/null; then
+        info "Detected Fedora/RHEL. Installing $pkg via dnf..."
+        sudo dnf install -y "$pkg"
+    elif command -v zypper &>/dev/null; then
+        info "Detected openSUSE. Installing $pkg via zypper..."
+        sudo zypper install -y "$pkg"
+    else
+        error "Unsupported distro. Please install '$pkg' manually."
+        return 1
+    fi
+}
+
+# === Drive D: mapping ===
+ensure_drive_mapping() {
+    if [ ! -L "$WINEPREFIX/dosdevices/d:" ]; then
+        ln -sf "$SBREW_PATH" "$WINEPREFIX/dosdevices/d:"
+    fi
+}
+
+# === VSCode passthrough ===
+setup_vscode_passthrough() {
+    info "Setting up Wine passthrough for VSCode..."
+    local passthru_dir="$HOME/.local/share/sbrew/vscode-fake"
+    local bin_dir="$passthru_dir/bin"
+    mkdir -p "$bin_dir"
+
+    cat <<'EOF' > "$bin_dir/code"
+#!/bin/bash
+ARGS=()
+for arg in "$@"; do
+    ARGS+=("$(wine winepath -u "$arg")")
+done
+code "${ARGS[@]}"
+EOF
+
+    chmod +x "$bin_dir/code"
+    local unix_path="Z:\\${bin_dir//\//\\}"
+    wine reg add "HKCU\\Environment" /v PATH /t REG_EXPAND_SZ /d "%PATH%;$unix_path" /f
+    info "VSCode passthrough setup complete."
+}
+
+# === Storybrew downloader ===
+install_storybrew() {
+    if [[ -f "$STORYBREW_EXE" ]]; then
+        info "Storybrew is already installed at $STORYBREW_EXE"
+        return
+    fi
+
+    info "Checking for latest Storybrew release..."
+    release_data=$(curl -s https://api.github.com/repos/damnae/storybrew/releases/latest)
+    zip_url=$(echo "$release_data" | grep browser_download_url | grep -E '\.zip"' | cut -d '"' -f 4)
+
+    if [[ -z "$zip_url" ]]; then
+        error "Could not find .zip release for Storybrew."
+        exit 1
+    fi
+
+    info "Downloading Storybrew from: $zip_url"
+    TMP=$(mktemp -d)
+    pushd "$TMP" > /dev/null
+    curl -LO "$zip_url"
+
+    info "Extracting..."
+    mkdir -p "$SBREW_PATH"
+    unzip -q *.zip -d "$SBREW_PATH"
+    popd > /dev/null
+    rm -rf "$TMP"
+
+    [[ -f "$STORYBREW_EXE" ]] && info "Storybrew installed successfully." || {
+        error "Storybrew extraction failed."
+        exit 1
+    }
+}
+
+# === .NET + SDK setup ===
+fixprefix() {
+    info "Resetting Wine 32-bit prefix..."
+    rm -rf "$WINEPREFIX"
+    mkdir -p "$WINEPREFIX"
+
+    info "Creating new prefix..."
+    WINEPREFIX="$WINEPREFIX" WINEARCH=win32 wineboot
+
+    info "Setting Windows version to 10..."
+    wine reg add "HKCU\\Software\\Wine\\Wine\\Config" /v Version /t REG_SZ /d win10 /f
+
+    info "Installing .NET Desktop Runtime 8.0.8 (x86)..."
+    TMP=$(mktemp -d)
+    pushd "$TMP"
+    wget -q https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.8/windowsdesktop-runtime-8.0.8-win-x86.exe
+    WINEPREFIX="$WINEPREFIX" wine windowsdesktop-runtime-8.0.8-win-x86.exe /quiet /norestart
+
+    info "Installing .NET SDK 8.0.408 (x86)..."
+    wget -q https://builds.dotnet.microsoft.com/dotnet/Sdk/8.0.408/dotnet-sdk-8.0.408-win-x86.exe
+    WINEPREFIX="$WINEPREFIX" wine dotnet-sdk-8.0.408-win-x86.exe /quiet /norestart
+    popd
+    rm -rf "$TMP"
+
+    ensure_drive_mapping
+    setup_vscode_passthrough
+    info "Wine prefix with .NET 8.0.8 + SDK ready."
+}
+
+# === Launch Storybrew ===
+launch_storybrew() {
+    if [[ ! -f "$STORYBREW_EXE" ]]; then
+        info "Storybrew not found. Installing..."
+        fixprefix
+        install_storybrew
+        setup_vscode_passthrough
+    fi
+
+    info "Launching Storybrew..."
+    ensure_drive_mapping
+    cd "$SBREW_PATH" || exit 1
+    WINEPREFIX="$WINEPREFIX" wine cmd /c \
+        "set DOTNET_ROOT=C:\\Program Files\\dotnet && D:\\StorybrewEditor.exe"
+}
+
+# === Debug info ===
+debuginfo() {
+    WINEPREFIX="$WINEPREFIX" wine "C:\\Program Files\\dotnet\\dotnet.exe" --list-runtimes
+}
+
+# === Desktop entry with icon ===
+install_desktop_entry() {
+    local desktop_path="$HOME/.local/share/applications/winebrew-storybrew.desktop"
+    local icon_dir="$HOME/.local/share/icons/storybrew"
+    local ico_url="https://raw.githubusercontent.com/Damnae/storybrew/master/editor/icon.ico"
+    local ico_file="$icon_dir/icon.ico"
+
+    if [[ -f "$desktop_path" ]]; then
+        info "Desktop entry already exists at $desktop_path"
+        return
+    fi
+
+    info "Installing Storybrew icon..."
+    mkdir -p "$icon_dir"
+    wget -q -O "$ico_file" "$ico_url"
+
+    local icon_path="$ico_file"
+
+    if ! command -v icotool &> /dev/null; then
+        warn "'icotool' not found. Trying to install 'icoutils'..."
+        install_package icoutils || return
+    fi
+
+    if command -v icotool &> /dev/null; then
+        icotool -x -o "$icon_dir" "$ico_file"
+        icon_path=$(find "$icon_dir" -type f -name '*256x256x32.png' | head -n1)
+        [[ -z "$icon_path" ]] && icon_path=$(find "$icon_dir" -type f -name '*.png' | head -n1)
+        [[ -z "$icon_path" ]] && icon_path="$ico_file"
+    fi
+
+    info "Writing .desktop file..."
+    cat <<EOF > "$desktop_path"
+[Desktop Entry]
+Name=Storybrew Editor
+Comment=Visual storyboard editor for osu!
+Exec=$HOME/.local/bin/winebrew
+Icon=$icon_path
+Terminal=false
+Type=Application
+Categories=Game;Utility;
+StartupWMClass=storybrew
+EOF
+
+    chmod +x "$desktop_path"
+    info "Desktop entry installed at $desktop_path"
+}
+
+# === Check for updates ===
+check_for_updates() {
+    local local_version_file="$(dirname "$0")/version.json"
+    local remote_version_url="https://raw.githubusercontent.com/maotovisk/winebrew/master/version.json"
+
+    if [[ ! -f "$local_version_file" ]]; then
+        warn "Local version file not found."
+        return
+    fi
+
+    local local_version=$(jq -r .version "$local_version_file")
+    local remote_version=$(curl -s "$remote_version_url" | jq -r .version)
+
+    if [[ "$remote_version" != "$local_version" ]]; then
+        info "Update available! Local version: $local_version, Remote version: $remote_version"
+        echo -n "Do you want to update now? [y/N] "
+        read -r answer
+        if [[ "$answer" =~ ^[Yy]$ ]]; then
+            curl -s -O https://raw.githubusercontent.com/maotovisk/winebrew/master/winebrew.sh
+            chmod +x winebrew.sh
+            info "Updated winebrew.sh to version $remote_version"
+            echo "$remote_version" > "$local_version_file"
+        else
+            info "Update cancelled."
+        fi
+    else
+        info "You are running the latest version: $local_version"
+    fi
+}
+
+# === Main ===
+case "$1" in
+    --fix-prefix) fixprefix ;;
+    --install-storybrew) install_storybrew ;;
+    --setup-vscode) setup_vscode_passthrough ;;
+    --install-desktop) install_desktop_entry ;;
+    --update) check_for_updates ;;
+    --debug) debuginfo ;;
+    "") launch_storybrew ;;
+    *)
+        error "Unknown argument: $1"
+        echo "Usage: $0 [--fix-prefix | --install-storybrew | --setup-vscode | --install-desktop | --debug]"
+        exit 1
+        ;;
+esac

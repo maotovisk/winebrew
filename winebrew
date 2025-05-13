@@ -211,7 +211,12 @@ check_for_updates() {
     fi
 
     local local_version=$(jq -r .version "$local_version_file")
-    local remote_version=$(curl -s "$remote_version_url" | jq -r .version)
+    local remote_version=$(curl -s "$remote_version_url" | jq -r .version
+
+    if [[ "$remote_version" == "null" ]]; then
+        error "Failed to fetch remote version."
+        exit 1
+    fi)
 
     if [[ "$remote_version" != "$local_version" ]]; then
         info "Update available! Installed version: $local_version, New version: $remote_version"

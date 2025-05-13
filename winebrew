@@ -7,6 +7,7 @@ export WINEDEBUG="-all"
 export SBREW_PATH="$HOME/.local/share/sbrew"
 export STORYBREW_EXE="$SBREW_PATH/StorybrewEditor.exe"
 export STORYBREW_DRIVE_PATH="D:\\StorybrewEditor.exe"
+export WINEDLLOVERRIDES="explorer.exe=n,b"
 
 # === Colored logging helpers ===
 info()  { echo -e "\e[32m[winebrew] INFO:\e[0m $*"; }
@@ -122,6 +123,7 @@ fixprefix() {
 
     ensure_drive_mapping
     setup_vscode_passthrough
+    setup_folder_hijack
     info "Wine prefix with .NET 8.0.8 + SDK ready."
 }
 
@@ -132,6 +134,7 @@ launch_storybrew() {
         fixprefix
         install_storybrew
         setup_vscode_passthrough
+        setup_folder_hijack
     fi
 
     info "Launching Storybrew..."
@@ -222,6 +225,70 @@ check_for_updates() {
         info "You are running the latest version: $local_version"
     fi
 }
+# === Setup run_as_linux ===
+install_run_as_linux() {
+    local script_path="$HOME/.local/bin/run_as_linux"
+
+    if [[ -f "$script_path" ]]; then
+        info "run_as_linux already exists at $script_path"
+        return
+    fi
+
+    info "Installing run_as_linux helper script..."
+
+    mkdir -p "$HOME/.local/bin"
+    cat <<'EOF' > "$script_path"
+#!/bin/bash
+
+if [ -z "$1" ]; then
+    echo "Usage: run_as_linux <command> [wine_path]"
+    exit 1
+fi
+
+COMMAND="$1"
+WINE_PATH="$2"
+
+if [[ -z "$WINE_PATH" ]]; then
+    echo "[run_as_linux] Missing path argument."
+    exit 1
+fi
+
+UNIX_PATH=$(wine winepath -u "$WINE_PATH" 2>/dev/null)
+
+if [[ -z "$UNIX_PATH" ]]; then
+    echo "[run_as_linux] Failed to convert path."
+    exit 1
+fi
+
+"$COMMAND" "$UNIX_PATH" &
+EOF
+
+    chmod +x "$script_path"
+    info "run_as_linux installed at $script_path"
+}
+
+# === Hijack folder for Storybrew ===
+setup_folder_hijack() {
+    install_run_as_linux
+
+    info "Applying registry override to use xdg-open for folders..."
+
+    local script_path="/home/$(whoami)/.local/bin/run_as_linux"
+
+    cat > /tmp/folder_hijack.reg <<EOF
+REGEDIT4
+
+[HKEY_CLASSES_ROOT\\Folder\\shell\\open\\command]
+@="/bin/sh $script_path xdg-open \\"%1\\""
+
+[-HKEY_CLASSES_ROOT\\Folder\\shell\\open\\ddeexec]
+EOF
+
+    WINEPREFIX="${WINEPREFIX:-$HOME/.sbrewprefix}" wine regedit /tmp/folder_hijack.reg
+    rm /tmp/folder_hijack.reg
+
+    info "Wine will now use xdg-open for folders."
+}
 
 # === Main ===
 case "$1" in
@@ -231,10 +298,11 @@ case "$1" in
     --install-desktop) install_desktop_entry ;;
     --update) check_for_updates ;;
     --debug) debuginfo ;;
+    --setup-folders) setup_folder_hijack ;;
     "") launch_storybrew ;;
     *)
         error "Unknown argument: $1"
-        echo "Usage: $0 [--fix-prefix | --install-storybrew | --setup-vscode | --install-desktop | --debug]"
+        echo "Usage: $0 [--fix-prefix | --install-storybrew | --setup-vscode | --install-desktop | --debug | --setup-folders]"
         exit 1
         ;;
 esac

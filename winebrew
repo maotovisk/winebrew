@@ -220,11 +220,18 @@ check_for_updates() {
         if [[ "$answer" =~ ^[Yy]$ ]]; then
             local tmp_dir=$(mktemp -d)
             curl -s -O https://raw.githubusercontent.com/maotovisk/winebrew/main/winebrew "$tmp_dir/winebrew"
-            chmod +x "$tmp_dir/winebrew"
             info "Removing old version..."
             rm -f "$WINEBREW_SCRIPT_PATH"
             info "Installing new version..."
-            mv -f "$tmp_dir/winebrew" "$WINEBREW_SCRIPT_PATH"
+            mv "$tmp_dir/winebrew" "$WINEBREW_SCRIPT_PATH"
+            chmod +x "$WINEBREW_SCRIPT_PATH"
+
+            if [[ -f "$WINEBREW_SCRIPT_PATH" ]]; then
+                info "New version installed successfully."
+            else
+                error "Failed to install new version."
+                exit 1
+            fi
             rm -rf "$tmp_dir"
 
             info "Updated winebrew to version $remote_version"

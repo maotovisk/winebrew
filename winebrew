@@ -53,9 +53,15 @@ setup_vscode_passthrough() {
     cat <<'EOF' > "$bin_dir/code"
 #!/bin/bash
 ARGS=()
+
 for arg in "$@"; do
-    ARGS+=("$(wine winepath -u "$arg")")
+    if [[ "$arg" == -* ]]; then
+    ARGS+=( "$arg" )
+    else
+    ARGS+=( "$(winepath -u "$arg")" )
+    fi
 done
+
 code "${ARGS[@]}"
 EOF
 

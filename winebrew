@@ -217,7 +217,7 @@ check_for_updates() {
     if [[ "$remote_version" == "null" ]]; then
         error "Failed to fetch remote version."
         exit 1
-    fi)
+    fi
 
     if [[ "$remote_version" != "$local_version" ]]; then
         info "Update available! Installed version: $local_version, New version: $remote_version"

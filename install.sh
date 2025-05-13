@@ -3,6 +3,14 @@
 set -e
 
 TARGET_DIR="$HOME/.local/bin"
+if [[ ! -d "$TARGET_DIR" ]]; then
+    mkdir -p "$TARGET_DIR"
+fi
+
+VERSION_DIR="$HOME/.local/share/winebrew"
+if [[ ! -d "$VERSION_DIR" ]]; then
+    mkdir -p "$VERSION_DIR"
+fi
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERSION_FILE="version.json"
 SCRIPT_FILE="winebrew"
@@ -54,7 +62,7 @@ mkdir -p "$TARGET_DIR"
 cp "$REPO_DIR/$SCRIPT_FILE" "$TARGET_DIR/winebrew"
 chmod +x "$TARGET_DIR/winebrew"
 
-cp "$REPO_DIR/$VERSION_FILE" "$TARGET_DIR/version.json"
+cp "$REPO_DIR/$VERSION_FILE" "$VERSION_DIR/version.json"
 
 info "winebrew copied to $TARGET_DIR"
 

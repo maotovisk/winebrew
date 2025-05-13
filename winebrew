@@ -7,7 +7,8 @@ export WINEDEBUG="-all"
 export SBREW_PATH="$HOME/.local/share/sbrew"
 export STORYBREW_EXE="$SBREW_PATH/StorybrewEditor.exe"
 export STORYBREW_DRIVE_PATH="D:\\StorybrewEditor.exe"
-export WINEDLLOVERRIDES="explorer.exe=n,b"
+export WINEBREW_SCRIPT_PATH="$HOME/.local/bin/winebrew"
+export VERSION_DIR="$HOME/.local/share/winebrew"
 
 # === Colored logging helpers ===
 info()  { echo -e "\e[32m[winebrew] INFO:\e[0m $*"; }
@@ -198,25 +199,35 @@ EOF
 
 # === Check for updates ===
 check_for_updates() {
-    local local_version_file="$(dirname "$0")/version.json"
-    local remote_version_url="https://raw.githubusercontent.com/maotovisk/winebrew/master/version.json"
+    local local_version_file="$VERSION_DIR/version.json"
+    local remote_version_url="https://raw.githubusercontent.com/maotovisk/winebrew/main/version.json"
 
     if [[ ! -f "$local_version_file" ]]; then
-        warn "Local version file not found."
-        return
+        warn "Local version file not found... Creating it."
+        if [[ ! -d "$VERSION_DIR" ]]; then
+            mkdir -p "$VERSION_DIR"
+        fi
+        echo '{"version": "0.0.0"}' > "$local_version_file"
     fi
 
     local local_version=$(jq -r .version "$local_version_file")
     local remote_version=$(curl -s "$remote_version_url" | jq -r .version)
 
     if [[ "$remote_version" != "$local_version" ]]; then
-        info "Update available! Local version: $local_version, Remote version: $remote_version"
+        info "Update available! Installed version: $local_version, New version: $remote_version"
         echo -n "Do you want to update now? [y/N] "
         read -r answer
         if [[ "$answer" =~ ^[Yy]$ ]]; then
-            curl -s -O https://raw.githubusercontent.com/maotovisk/winebrew/master/winebrew.sh
-            chmod +x winebrew.sh
-            info "Updated winebrew.sh to version $remote_version"
+            local tmp_dir=$(mktemp -d)
+            curl -s -O https://raw.githubusercontent.com/maotovisk/winebrew/main/winebrew "$tmp_dir/winebrew"
+            chmod +x "$tmp_dir/winebrew"
+            info "Removing old version..."
+            rm -f "$WINEBREW_SCRIPT_PATH"
+            info "Installing new version..."
+            mv -f "$tmp_dir/winebrew" "$WINEBREW_SCRIPT_PATH"
+            rm -rf "$tmp_dir"
+
+            info "Updated winebrew to version $remote_version"
             echo "$remote_version" > "$local_version_file"
         else
             info "Update cancelled."
@@ -225,6 +236,7 @@ check_for_updates() {
         info "You are running the latest version: $local_version"
     fi
 }
+
 # === Setup run_as_linux ===
 install_run_as_linux() {
     local script_path="$HOME/.local/bin/run_as_linux"

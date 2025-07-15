@@ -12,7 +12,7 @@ export VERSION_DIR="$HOME/.local/share/winebrew"
 
 # === Wine-osu configuration ===
 export WINE_OSU_DIR="$HOME/.local/share/winebrew/wine-osu"
-export WINE_OSU_VERSION="10.6-1"
+export WINE_OSU_VERSION="10.10-2"
 export WINE_OSU_VERSION_FILE="$VERSION_DIR/wine-osu-version"
 export WINE_OSU_BIN="$WINE_OSU_DIR/bin/wine"
 
@@ -132,6 +132,94 @@ install_storybrew() {
         error "Storybrew extraction failed."
         exit 1
     }
+}
+
+# === Update Storybrew ===
+update_storybrew() {
+    info "Checking for Storybrew updates..."
+    
+    # Get current installed version if available
+    local current_version=""
+    if [[ -f "$STORYBREW_EXE" ]]; then
+        # Try to extract version from the executable (this is best effort)
+        current_version=$(wine "$STORYBREW_EXE" --version 2>/dev/null | head -n1 || echo "unknown")
+        info "Current Storybrew version: $current_version"
+    else
+        info "Storybrew is not currently installed."
+    fi
+    
+    # Get latest release info
+    info "Fetching latest Storybrew release information..."
+    release_data=$(curl -s https://api.github.com/repos/damnae/storybrew/releases/latest)
+    latest_version=$(echo "$release_data" | jq -r .tag_name 2>/dev/null || echo "")
+    zip_url=$(echo "$release_data" | grep browser_download_url | grep -E '\.zip"' | cut -d '"' -f 4)
+
+    if [[ -z "$zip_url" ]]; then
+        error "Could not find .zip release for Storybrew."
+        return 1
+    fi
+
+    if [[ -z "$latest_version" ]]; then
+        warn "Could not determine latest version, but will proceed with download."
+        latest_version="latest"
+    else
+        info "Latest Storybrew version: $latest_version"
+    fi
+
+    # Ask user if they want to proceed with update
+    if [[ -f "$STORYBREW_EXE" ]]; then
+        echo -n "Do you want to update Storybrew to version $latest_version? [y/N] "
+        read -r answer
+        if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+            info "Update cancelled."
+            return 0
+        fi
+    fi
+
+    # Backup current installation if it exists
+    if [[ -f "$STORYBREW_EXE" ]]; then
+        local backup_dir="$SBREW_PATH.backup.$(date +%s)"
+        info "Creating backup at $backup_dir..."
+        cp -r "$SBREW_PATH" "$backup_dir"
+    fi
+
+    # Download and install new version
+    TMP=$(mktemp -d)
+    local zip_file="$TMP/storybrew.zip"
+
+    info "Downloading Storybrew version $latest_version..."
+    download_file "$zip_url" "$zip_file" || {
+        error "Failed to download Storybrew. Please check your internet connection."
+        rm -rf "$TMP"
+        return 1
+    }
+
+    info "Removing old installation..."
+    rm -rf "$SBREW_PATH"
+
+    info "Installing new version..."
+    mkdir -p "$SBREW_PATH"
+    unzip -q "$zip_file" -d "$SBREW_PATH"
+    rm -rf "$TMP"
+
+    if [[ -f "$STORYBREW_EXE" ]]; then
+        info "Storybrew updated successfully to version $latest_version!"
+        # Clean up backup if update was successful
+        if [[ -d "$backup_dir" ]]; then
+            info "Removing backup (update successful)..."
+            rm -rf "$backup_dir"
+        fi
+    else
+        error "Storybrew update failed."
+        # Restore backup if available
+        if [[ -d "$backup_dir" ]]; then
+            warn "Restoring backup..."
+            rm -rf "$SBREW_PATH"
+            mv "$backup_dir" "$SBREW_PATH"
+            info "Backup restored."
+        fi
+        return 1
+    fi
 }
 
 # === .NET + SDK setup ===
@@ -464,6 +552,7 @@ Options:
   --help                  Display this help message
   --fix-prefix            Recreate Wine prefix and reinstall .NET
   --install-storybrew     (Re)download Storybrew to the correct folder
+  --update-storybrew      Check for and install updates to Storybrew only
   --setup-vscode          Recreate the VSCode passthrough script
   --install-desktop       Create a desktop entry for launching
   --update                Check for updates to the script and wine-osu
@@ -480,6 +569,7 @@ case "$1" in
     --help) show_help ;;
     --fix-prefix) fixprefix ;;
     --install-storybrew) install_storybrew ;;
+    --update-storybrew) update_storybrew ;;
     --setup-vscode) setup_vscode_passthrough ;;
     --install-desktop) install_desktop_entry ;;
     --update) check_for_updates ;;

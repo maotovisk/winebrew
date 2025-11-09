@@ -6,7 +6,7 @@ export WINEARCH=wow64
 export WINEDEBUG="-all"
 export SBREW_PATH="$HOME/.local/share/sbrew"
 export STORYBREW_EXE="$SBREW_PATH/StorybrewEditor.exe"
-export STORYBREW_DRIVE_PATH="D:\\StorybrewEditor.exe"
+export STORYBREW_DRIVE_PATH="S:\\StorybrewEditor.exe"
 export WINEBREW_SCRIPT_PATH="$HOME/.local/bin/winebrew"
 export VERSION_DIR="$HOME/.local/share/winebrew"
 
@@ -63,10 +63,10 @@ install_package() {
     fi
 }
 
-# === Drive D: mapping ===
+# === Drive S: mapping ===
 ensure_drive_mapping() {
-    if [ ! -L "$WINEPREFIX/dosdevices/d:" ]; then
-        ln -sf "$SBREW_PATH" "$WINEPREFIX/dosdevices/d:"
+    if [ ! -L "$WINEPREFIX/dosdevices/s:" ]; then
+        ln -sf "$SBREW_PATH" "$WINEPREFIX/dosdevices/s:"
     fi
 }
 
@@ -137,7 +137,7 @@ install_storybrew() {
 # === Update Storybrew ===
 update_storybrew() {
     info "Checking for Storybrew updates..."
-    
+
     # Get current installed version if available
     local current_version=""
     if [[ -f "$STORYBREW_EXE" ]]; then
@@ -147,7 +147,7 @@ update_storybrew() {
     else
         info "Storybrew is not currently installed."
     fi
-    
+
     # Get latest release info
     info "Fetching latest Storybrew release information..."
     release_data=$(curl -s https://api.github.com/repos/damnae/storybrew/releases/latest)
@@ -276,7 +276,7 @@ launch_storybrew() {
     ensure_drive_mapping
     cd "$SBREW_PATH" || exit 1
     WINEPREFIX="$WINEPREFIX" wine cmd /c \
-        "set DOTNET_ROOT=C:\\Program Files\\dotnet && D:\\StorybrewEditor.exe"
+        "set DOTNET_ROOT=C:\\Program Files\\dotnet && S:\\StorybrewEditor.exe"
 }
 
 # === Debug info ===
